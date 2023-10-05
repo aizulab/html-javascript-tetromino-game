@@ -1,0 +1,399 @@
+<html>
+  <body>
+    <div id="initial">
+      <button type="button" onclick="startGame()">スタート</button>
+    </div>
+
+    <div id="main" hidden>
+      <pre id="board"></pre>
+      <div>
+        <button id="left-button" type="button">←</button>
+        <button id="right-button" type="button">→</button>
+      </div>
+      <div>
+        <button id="down-button" type="button">↓</button>
+      </div>
+      <div>
+        <button id="rotate-button" type="button">回転</button>
+      </div>
+    </div>
+
+    <div id="game-over" hidden>
+      <p>*GAME OVER*</p>
+      <button type="button" onclick="startGame()">リトライ</button>
+    </div>
+
+    <script>
+/**
+ * 配列からランダムな要素を取り出します
+ * @template T
+ * @param {T[]} arr 配列。
+ * @returns {T} 配列中のランダムな要素。
+ */
+const choice = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+/**
+ * 数値の配列の要素の合計値を計算します。
+ * @param {number[]} arr 配列。
+ * @returns {number} 配列の要素の合計値。
+ */
+const sum = (arr) => arr.reduce((acc, x) => acc + x, 0);
+
+/**
+ * 数値の配列の要素の平均値を計算します。
+ * @param {number[]} arr 配列。
+ * @returns {number} 配列の要素の平均値。
+ */
+const average = (arr) => sum(arr) / arr.length;
+
+/**
+ * ゲームオーバーを表すエラー。
+ */
+class GameOver extends Error {
+  constructor() {
+    super("ゲームオーバー");
+    this.name = "GameOver";
+  }
+}
+
+/**
+ * 盤面のセル。
+ */
+const Cell = Object.freeze({
+  /**
+   * 空白。
+   */
+  Empty: "_",
+  /**
+   * 落下中のテトロミノ。
+   */
+  FallingTetromino: "+",
+  /**
+   * 落下し終わって固定されたテトロミノ
+   */
+  FixedTetromino: "#",
+});
+
+/** 盤面。 */
+class Board {
+  /**
+   * @param {number} width 盤面の横の長さ。
+   * @param {number} height 盤面の縦の長さ。
+   */
+  constructor(width, height) {
+    /**
+     * 盤面の横の長さ。
+     * @type {number}
+     */
+    this.width = width;
+    /**
+     * 盤面の縦の長さ。
+     * @type {number}
+     */
+    this.height = height;
+    /**
+     * 盤面のセル群。
+     * @type {Cell[][]}
+     */
+    this.cells = [...Array(height)].map(() => Array(width).fill(Cell.Empty));
+    /**
+     * テトロミノの形状。
+     * @type {string|null}
+     */
+    this.tetrominoType = null;
+  }
+
+  /**
+   * 落下中のテトロミノが左に移動できる場合は true、そうでなければ false。
+   * @type {boolean}
+   */
+  get canMoveTetrominoLeft() {
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        if (this.cells[y][x] === Cell.FallingTetromino) {
+          // 左端に到達したか、左に固定されたテトロミノがある
+          if (x === 0 || this.cells[y][x - 1] === Cell.FixedTetromino) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 落下中のテトロミノが右に移動できる場合は true、そうでなければ false。
+   * @type {boolean}
+   */
+  get canMoveTetrominoRight() {
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        if (this.cells[y][x] === Cell.FallingTetromino) {
+          // 右端に到達したか、右に固定されたテトロミノがある
+          if (x === this.width - 1 || this.cells[y][x + 1] === Cell.FixedTetromino) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 落下中のテトロミノが下に移動できる場合は true、そうでなければ false。
+   * @type {boolean}
+   */
+  get canMoveTetrominoDown() {
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        if (this.cells[y][x] === Cell.FallingTetromino) {
+          // 下端に到達したか、下に固定されたテトロミノがある
+          if (y === this.height - 1 || this.cells[y + 1][x] === Cell.FixedTetromino) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 落下中のテトロミノが左に移動できる場合、左に１マス移動します。
+   */
+  moveTetrominoLeft = () => {
+    if (this.canMoveTetrominoLeft) {
+      for (let y = 0; y < this.height; y++) {
+        for (let x = 0; x < this.width; x++) {
+          if (this.cells[y][x] === Cell.FallingTetromino) {
+            this.cells[y][x - 1] = Cell.FallingTetromino; // １マス左に移動させる
+            this.cells[y][x] = Cell.Empty; // 元々の位置は空白にする
+          }
+        }
+      }
+    }
+  };
+
+  /**
+   * 落下中のテトロミノが右に移動できる場合、右に１マス移動します。
+   */
+  moveTetrominoRight = () => {
+    if (this.canMoveTetrominoRight) {
+      for (let y = 0; y < this.height; y++) {
+        for (let x = this.width - 1; x >= 0; x--) {
+          if (this.cells[y][x] === Cell.FallingTetromino) {
+            this.cells[y][x + 1] = Cell.FallingTetromino; // １マス右に移動させる
+            this.cells[y][x] = Cell.Empty; // 元々の位置は空白にする
+          }
+        }
+      }
+    }
+  };
+
+  /**
+   * 落下中のテトロミノが下に移動できる場合、下に１マス移動します。
+   */
+  moveTetrominoDown = () => {
+    if (this.canMoveTetrominoDown) {
+      for (let y = this.height - 1; y >= 0; y--) {
+        for (let x = this.width - 1; x >= 0; x--) {
+          if (this.cells[y][x] === Cell.FallingTetromino) {
+            this.cells[y + 1][x] = Cell.FallingTetromino; // １マス下に移動させる
+            this.cells[y][x] = Cell.Empty; // 元々の位置は空白にする
+          }
+        }
+      }
+    }
+  };
+
+  /**
+   * 落下中のテトロミノが右に回転できる場合、右に回転します。
+   */
+  rotateTetromino = () => {
+    // O ミノは回転しても同じ形になるので何もしない
+    if (this.tetrominoType === "O") return;
+
+    // 落下中のテトロミノの座標を取得
+    const fallingTetromino = [];
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        if (this.cells[y][x] === Cell.FallingTetromino) {
+          fallingTetromino.push([x, y]);
+        }
+      }
+    }
+
+    // 回転の中心座標を計算
+    const centerX = Math.round(average(fallingTetromino.map(([x, _]) => x)));
+    const centerY = Math.round(average(fallingTetromino.map(([_, y]) => y)));
+
+    // 落下中のテトロミノを右に回転させた後のテトロミノの座標を計算
+    const rotatedTetromino = [];
+    for (let [x, y] of fallingTetromino) {
+      const diffX = x - centerX;
+      const diffY = y - centerY;
+      rotatedTetromino.push([centerX - diffY, centerY + diffX]);
+    }
+
+    for (let [x, y] of rotatedTetromino) {
+      // 回転後のテトロミノが盤面の外に出てしまったり、固定されたテトロミノと重なっている場合は回転を中止
+      if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+      if (this.cells[y][x] === Cell.FixedTetromino) return;
+    }
+
+    // 回転前のテトロミノを削除
+    for (let [x, y] of fallingTetromino) {
+      this.cells[y][x] = Cell.Empty;
+    }
+    // 回転後のテトロミノを作成
+    for (let [x, y] of rotatedTetromino) {
+      this.cells[y][x] = Cell.FallingTetromino;
+    }
+  };
+
+  /**
+   * 盤面上に、ランダムな形状の新しいテトロミノを生成します。
+   * @throws {GameOver} 盤面上にテトロミノを生成できない場合。
+   */
+  createNewTetromino = () => {
+    // テトロミノを生成する基準の座標
+    const [baseX, baseY] = [Math.ceil(this.width / 2) - 2, 0];
+
+    const tetrominos = {
+      I: [[0, 0], [1, 0], [2, 0], [3, 0]],
+      O: [[1, 0], [2, 0], [1, 1], [2, 1]],
+      S: [[1, 0], [2, 0], [0, 1], [1, 1]],
+      Z: [[0, 0], [1, 0], [1, 1], [2, 1]],
+      J: [[0, 0], [0, 1], [1, 1], [2, 1]],
+      L: [[2, 0], [0, 1], [1, 1], [2, 1]],
+      T: [[0, 0], [1, 0], [2, 0], [1, 1]],
+    };
+
+    // ランダムに形状を決定
+    this.tetrominoType = choice(Object.keys(tetrominos));
+
+    for (let [minoX, minoY] of tetrominos[this.tetrominoType]) {
+      const [x, y] = [baseX + minoX, baseY + minoY];
+      if (this.cells[y][x] === Cell.FixedTetromino) {
+        throw new GameOver();
+      }
+      this.cells[y][x] = Cell.FallingTetromino;
+    }
+  };
+
+  /**
+   * 落下中のテトロミノを固定されたテトロミノに変えます。
+   */
+  fixTetromino = () => {
+    this.cells = this.cells.map((row) =>
+      row.map((cell) =>
+        cell === Cell.FallingTetromino ? Cell.FixedTetromino : cell
+      )
+    );
+  };
+
+  /**
+   * 横一列に揃った行を削除します。
+   */
+  deleteCompletedRows = () => {
+    for (let y = 0; y < this.height; y++) {
+      if (this.cells[y].every((cell) => cell === Cell.FixedTetromino)) {
+        for (let x = 0; x < this.width; x++) {
+          // この行を空白にする
+          this.cells[y][x] = Cell.Empty;
+          // この行より上の行は、１つ下に移動させる
+          for (let i = y - 1; i >= 0; i--) {
+            this.cells[i + 1][x] = this.cells[i][x];
+          }
+          // 一番上の行は空白にする
+          this.cells[0][x] = Cell.Empty;
+        }
+      }
+    }
+  };
+}
+
+/**
+ * 盤面を画面に表示します。
+ * @param {Board} board 盤面。
+ */
+const showBoard = (board) => {
+  document.getElementById("board").innerText = board.cells
+    .map((row) => row.join(" "))
+    .join("\n");
+};
+
+/**
+ * ゲームオーバー画面を表示します。
+ */
+const showGameOver = () => {
+  document.getElementById("initial").hidden = true;
+  document.getElementById("main").hidden = true;
+  document.getElementById("game-over").hidden = false;
+};
+
+/**
+ * メイン画面を表示します。
+ */
+const showMainScreen = () => {
+  document.getElementById("initial").hidden = true;
+  document.getElementById("main").hidden = false;
+  document.getElementById("game-over").hidden = true;
+};
+
+/**
+ * ゲームを開始します。
+ */
+function startGame() {
+  const board = new Board(10, 10);
+
+  // ループ毎に１ずつ増加するタイマー
+  let timer = 0;
+
+  // 最初のテトロミノを生成
+  board.createNewTetromino();
+
+  showBoard(board);
+  showMainScreen();
+
+  // ボタン操作を登録
+  document.getElementById("left-button").addEventListener("click", () => {
+    board.moveTetrominoLeft();
+  });
+  document.getElementById("right-button").addEventListener("click", () => {
+    board.moveTetrominoRight();
+  });
+  document.getElementById("down-button").addEventListener("click", () => {
+    board.moveTetrominoDown();
+  });
+  document.getElementById("rotate-button").addEventListener("click", () => {
+    board.rotateTetromino();
+  });
+
+  // 0.1 秒ごとにループ
+  const intervalId = setInterval(() => {
+    // 10 回に１回だけ実行
+    if (timer % 10 === 0) {
+      if (board.canMoveTetrominoDown) {
+        board.moveTetrominoDown();
+      } else {
+        board.fixTetromino();
+        board.deleteCompletedRows();
+        try {
+          board.createNewTetromino();
+        } catch (error) {
+          if (error instanceof GameOver) {
+            showGameOver();
+            clearInterval(intervalId); // ループを終了
+            return;
+          }
+        }
+      }
+    }
+
+    showBoard(board);
+    timer++;
+  }, 100);
+}
+    </script>
+  </body>
+</html>
